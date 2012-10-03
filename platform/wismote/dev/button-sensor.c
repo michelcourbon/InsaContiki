@@ -31,28 +31,40 @@
 #include "lib/sensors.h"
 #include "dev/hwconf.h"
 #include "dev/button-sensor.h"
-#include "isr_compat.h"
 
 const struct sensors_sensor button_sensor;
 
 static struct timer debouncetimer;
 static int status(int type);
 
-HWCONF_PIN(BUTTON, 2, 7);
-HWCONF_IRQ(BUTTON, 2, 7);
+HWCONF_PIN(BUTTON, 1, 4);
+HWCONF_IRQ(BUTTON, 1, 4);
 
 /*---------------------------------------------------------------------------*/
-ISR(PORT2, irq_p2)
+#ifdef __IAR_SYSTEMS_ICC__
+//#pragma vector=PORT1_VECTOR
+__interrupt void
+#else
+
+//interrupt(PORT1_VECTOR)
+#endif
+int	irq_p1(void)
 {
   ENERGEST_ON(ENERGEST_TYPE_IRQ);
 
-  if(BUTTON_CHECK_IRQ() && timer_expired(&debouncetimer)) {
-    timer_set(&debouncetimer, CLOCK_SECOND / 4);
-    sensors_changed(&button_sensor);
-    LPM4_EXIT;
+  if(BUTTON_CHECK_IRQ()) {
+    if(timer_expired(&debouncetimer)) {
+      timer_set(&debouncetimer, CLOCK_SECOND / 4);
+      sensors_changed(&button_sensor);
+
+      ENERGEST_OFF(ENERGEST_TYPE_IRQ);
+      return 1;//LPM4_EXIT;
+    }
   }
-  P2IFG = 0x00;
+
+
   ENERGEST_OFF(ENERGEST_TYPE_IRQ);
+  return 0;
 }
 /*---------------------------------------------------------------------------*/
 static int
@@ -62,14 +74,11 @@ value(int type)
 }
 /*---------------------------------------------------------------------------*/
 static int
-configure(int type, int value)
+configure(int type, int c)
 {
-  if(type == SENSORS_ACTIVE) {
-    if(value == 0) {
-      /* Deactivate button sensor */
-      BUTTON_DISABLE_IRQ();
-    } else {
-      /* Activate button sensor */
+  switch (type) {
+  case SENSORS_ACTIVE:
+    if (c) {
       if(!status(SENSORS_ACTIVE)) {
 	timer_set(&debouncetimer, 0);
 	BUTTON_IRQ_EDGE_SELECTD();
@@ -79,6 +88,8 @@ configure(int type, int value)
 
 	BUTTON_ENABLE_IRQ();
       }
+    } else {
+      BUTTON_DISABLE_IRQ();
     }
     return 1;
   }
@@ -88,13 +99,12 @@ configure(int type, int value)
 static int
 status(int type)
 {
-  switch(type) {
+  switch (type) {
   case SENSORS_ACTIVE:
   case SENSORS_READY:
     return BUTTON_IRQ_ENABLED();
-  default:
-    return 0;
   }
+  return 0;
 }
 /*---------------------------------------------------------------------------*/
 SENSORS_SENSOR(button_sensor, BUTTON_SENSOR,

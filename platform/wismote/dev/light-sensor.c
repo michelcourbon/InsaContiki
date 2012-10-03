@@ -31,37 +31,32 @@
 
 #include "contiki.h"
 #include "lib/sensors.h"
-#include "dev/sky-sensors.h"
 #include "dev/light-sensor.h"
 
 const struct sensors_sensor light_sensor;
+static uint8_t active;
 
 /*---------------------------------------------------------------------------*/
 static int
 value(int type)
 {
-  /* switch(type) { */
-  /* case LIGHT_SENSOR_PHOTOSYNTHETIC: */
-  /*    /\* Photosynthetically Active Radiation. *\/ */
-  /*   return ADC12MEM0; */
-  /* case LIGHT_SENSOR_TOTAL_SOLAR: */
-  /*   /\* Total Solar Radiation. *\/ */
-  /*   return ADC12MEM1; */
-  /* } */
-  return 0;
+	ADC12IFG &= ~ADC12IFG0;        // Clear "conversion finished" Interrupt Flag
+	ADC12CTL0 |= ADC12SC;          // Start sampling/conversion
+	while(!(ADC12IFG & ADC12IFG0)); // When sampling is over
+	return ADC12MEM0;
 }
+
 /*---------------------------------------------------------------------------*/
 static int
 status(int type)
 {
-/*
   switch(type) {
   case SENSORS_ACTIVE:
   case SENSORS_READY:
-    return (ADC12CTL0 & (ADC12ON + REFON)) == (ADC12ON + REFON);
+    return active;
+  default:
+    return 0;
   }
-*/
-  return 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -72,18 +67,19 @@ configure(int type, int c)
   case SENSORS_ACTIVE:
     if(c) {
       if(!status(SENSORS_ACTIVE)) {
-
-//	ADC12MCTL0 = (INCH_4 + SREF_0); // photodiode 1 (P64)
-//	ADC12MCTL1 = (INCH_5 + SREF_0); // photodiode 2 (P65)
-
-	sky_sensors_activate(0x30);
+        ADC12CTL0 = ADC12SHT02 + ADC12ON;         // Sampling time, ADC12 on
+        ADC12CTL1 = ADC12SHP;                     // Use sampling timer
+        ADC12MCTL0 |= ADC12INCH3;
+        P4DIR |= BIT2;   P4OUT &= ~BIT2; //  shutdown off
+        P5SEL |= BIT0;      // P5.0 ADC option select LUMINOSITY sensor
+        P5DIR &= ~BIT0;     // P5.0 as INPUT
+        ADC12CTL0 |= ADC12ENC;  // Enable Conversion (ADC12_A enabled)
       }
     } else {
-      sky_sensors_deactivate(0x30);
     }
+    break;
   }
   return 0;
 }
 /*---------------------------------------------------------------------------*/
-SENSORS_SENSOR(light_sensor, "Light",
-	       value, configure, status);
+SENSORS_SENSOR(light_sensor, "Light", value, configure, status);

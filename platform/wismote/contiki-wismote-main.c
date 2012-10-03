@@ -32,8 +32,25 @@
 #include <stdio.h>
 #include <string.h>
 
+#define DEBUG 1
+#if DEBUG
+#define PRINTF(...) printf(__VA_ARGS__)
+#else
+#define PRINTF(...)
+#endif
+
 #include "dev/cc2520.h"
-//#include "dev/ds2411.h"
+
+/*-- unique id stored in ds2411 or memory --*/
+#if PLATFORM_HAS_DS2411
+#include "dev/ds2411.h"
+#else
+#include "arch/mem-id.h"
+#endif /* if uid is in memory.. insa Mote */
+
+/* usefull for rime address and 15.4 adress */
+unsigned char euid64_id[8];
+
 #include "dev/leds.h"
 #include "dev/serial-line.h"
 #include "dev/slip.h"
@@ -50,7 +67,6 @@
 
 #include "net/rime.h"
 
-#include "node-id.h"
 #include "sys/autostart.h"
 #include "sys/profile.h"
 
@@ -94,37 +110,9 @@ static uint8_t is_gateway;
 
 void init_platform(void);
 
-/*---------------------------------------------------------------------------*/
-#if 0
-int
-force_float_inclusion()
-{
-  extern int __fixsfsi;
-  extern int __floatsisf;
-  extern int __mulsf3;
-  extern int __subsf3;
-
-  return __fixsfsi + __floatsisf + __mulsf3 + __subsf3;
-}
-#endif
-/*---------------------------------------------------------------------------*/
-void uip_log(char *msg) { puts(msg); }
-/*---------------------------------------------------------------------------*/
-#ifndef RF_CHANNEL
-#define RF_CHANNEL              26
-#endif
-/*---------------------------------------------------------------------------*/
-#if 0
-void
-force_inclusion(int d1, int d2)
-{
-  snprintf(NULL, 0, "%d", d1 % d2);
-}
-#endif
-/*---------------------------------------------------------------------------*/
-#ifndef NODE_ID
-#define NODE_ID	0x03
-#endif /* NODE_ID */
+/*
+ * set Rime address
+ */
 static void
 set_rime_addr(void)
 {
@@ -133,45 +121,35 @@ set_rime_addr(void)
 
   memset(&n_addr, 0, sizeof(rimeaddr_t));
 
-  //	Set node address
+  //  Set node address
 #if UIP_CONF_IPV6
-  //memcpy(addr.u8, ds2411_id, sizeof(addr.u8));
-  n_addr.u8[7] = node_id & 0xff;
-  n_addr.u8[6] = node_id >> 8;
+  memcpy(n_addr.u8, euid64_id, sizeof(n_addr.u8));
 #else
- /* if(node_id == 0) {
-    for(i = 0; i < sizeof(rimeaddr_t); ++i) {
-      addr.u8[i] = ds2411_id[7 - i];
-    }
-  } else {
-    addr.u8[0] = node_id & 0xff;
-    addr.u8[1] = node_id >> 8;
-  }*/
   n_addr.u8[0] = node_id & 0xff;
   n_addr.u8[1] = node_id >> 8;
 #endif
 
   rimeaddr_set_node_addr(&n_addr);
-  printf("Rime started with address ");
+
+  PRINTF("Rime started with address ");
   for(i = 0; i < sizeof(n_addr.u8) - 1; i++) {
-    printf("%d.", n_addr.u8[i]);
+    PRINTF("%X.", n_addr.u8[i]);
   }
-  printf("%d\n", n_addr.u8[i]);
+  PRINTF("%X \n\r", n_addr.u8[i]);
+
 }
 /*---------------------------------------------------------------------------*/
-#if !PROCESS_CONF_NO_PROCESS_NAMES
 static void
 print_processes(struct process * const processes[])
 {
   /*  const struct process * const * p = processes;*/
-  printf("Starting");
+  PRINTF("Starting");
   while(*processes != NULL) {
-    printf(" '%s'", (*processes)->name);
+    PRINTF(" '%s'", (*processes)->name);
     processes++;
   }
-  putchar('\n');
+  PRINTF("\n");
 }
-#endif /* !PROCESS_CONF_NO_PROCESS_NAMES */
 /*--------------------------------------------------------------------------*/
 #if WITH_UIP
 static void
@@ -179,135 +157,120 @@ set_gateway(void)
 {
   if(!is_gateway) {
     leds_on(LEDS_RED);
-    //printf("%d.%d: making myself the IP network gateway.\n\n",
-	//   rimeaddr_node_addr.u8[0], rimeaddr_node_addr.u8[1]);
-    //printf("IPv4 address of the gateway: %d.%d.%d.%d\n\n",
-	 //  uip_ipaddr_to_quad(&uip_hostaddr));
     uip_over_mesh_set_gateway(&rimeaddr_node_addr);
     uip_over_mesh_make_announced_gateway();
     is_gateway = 1;
   }
 }
 #endif /* WITH_UIP */
-/*---------------------------------------------------------------------------*/
+
+/*--------------------------------------------*/
+
+#if LED_ALIVE_TEST
+uint8_t rtimerflag=1;
+struct rtimer rt;
+void rtimercycle(void) {rtimerflag=1;}
+uint8_t is_board_alive = 1;
+#endif
+
+/*-----------  main loop ---------------------*/
 int
 main(int argc, char **argv)
 {
   /*
    * Initalize hardware.
    */
-
-  msp430_cpu_init();
+  msp430_cpu_init(); 
   clock_init();
+  uart1_init(115200); /* Must come before first PRINTF */
+
   leds_init();
+  leds_on(LEDS_ALL);
 
-  leds_on(LEDS_RED);
-
-  clock_wait(2);
-
-  uart1_init(115200); /* Must come before first printf */
-
-#if WITH_UIP
+#if WITH_UIP6
   slip_arch_init(115200);
 #endif /* WITH_UIP */
 
-  clock_wait(1);
-
-  leds_on(LEDS_GREEN);
-  //ds2411_init();
-
-  /* XXX hack: Fix it so that the 802.15.4 MAC address is compatible
-     with an Ethernet MAC address - byte 0 (byte 2 in the DS ID)
-     cannot be odd. */
-  //ds2411_id[2] &= 0xfe;
-
-  leds_on(LEDS_BLUE);
-  //xmem_init();
-
-  leds_off(LEDS_RED);
   rtimer_init();
+
   /*
    * Hardware initialization done!
    */
 
-  node_id = NODE_ID;
+  clock_wait(2);
+  putchar('\n');
 
-  /* Restore node id if such has been stored in external mem */
-  //node_id_restore();
-
-  /* for setting "hardcoded" IEEE 802.15.4 MAC addresses */
-#ifdef IEEE_802154_MAC_ADDRESS
-  {
-    uint8_t ieee[] = IEEE_802154_MAC_ADDRESS;
-    //memcpy(ds2411_id, ieee, sizeof(uip_lladdr.addr));
-    //ds2411_id[7] = node_id & 0xff;
-  }
+/* XXX hack: Fix it so that the 802.15.4 MAC address is compatible
+     with an Ethernet MAC address - byte 0 (byte 2 in the DS ID)
+     cannot be odd. */
+#if PLATFORM_HAS_DS2411
+  ds2411_init();
+  memcpy (euid64_id,ds2411_id,sizeof(euid64_id));
+#else
+  memory_id_init();
+  memcpy (euid64_id,memory_id,sizeof(euid64_id));
+  euid64_id[0]=0;euid64_id[1]=0;euid64_id[2]=0;euid64_id[3]=0;
 #endif
-
-  //random_init(ds2411_id[0] + node_id);
+  euid64_id[2] &= 0xfe;
 
   leds_off(LEDS_BLUE);
+
   /*
    * Initialize Contiki and our processes.
    */
   process_init();
   process_start(&etimer_process, NULL);
-
   ctimer_init();
-
   init_platform();
 
+  clock_wait(2);
   set_rime_addr();
+  PRINTF(" %s started. \n\r",CONTIKI_VERSION_STRING);
 
-  cc2520_init();
-  {
-    uint8_t longaddr[8];
-    uint16_t shortaddr;
-
-    shortaddr = (rimeaddr_node_addr.u8[0] << 8) +
-      rimeaddr_node_addr.u8[1];
-    memset(longaddr, 0, sizeof(longaddr));
-    rimeaddr_copy((rimeaddr_t *)&longaddr, &rimeaddr_node_addr);
-
-    printf("MAC %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x ",
-           longaddr[0], longaddr[1], longaddr[2], longaddr[3],
-           longaddr[4], longaddr[5], longaddr[6], longaddr[7]);
-
-    cc2520_set_pan_addr(IEEE802154_PANID, shortaddr, longaddr);
-  }
-  cc2520_set_channel(RF_CHANNEL);
-
-  printf(CONTIKI_VERSION_STRING " started. ");
-  if(node_id > 0) {
-    printf("Node id is set to %u.\n", node_id);
-  } else {
-    printf("Node id is not set.\n");
-  }
+  int i ;
 
 #if WITH_UIP6
-  /* memcpy(&uip_lladdr.addr, ds2411_id, sizeof(uip_lladdr.addr)); */
-  memcpy(&uip_lladdr.addr, rimeaddr_node_addr.u8,
-         UIP_LLADDR_LEN > RIMEADDR_SIZE ? RIMEADDR_SIZE : UIP_LLADDR_LEN);
 
-  /* Setup nullmac-like MAC for 802.15.4 */
-/*   sicslowpan_init(sicslowmac_init(&cc2520_driver)); */
-/*   printf(" %s channel %u\n", sicslowmac_driver.name, RF_CHANNEL); */
+  for(i =0;i<RIMEADDR_SIZE;i++)
+    uip_lladdr.addr[i] = rimeaddr_node_addr.u8[i];
 
   /* Setup X-MAC for 802.15.4 */
   queuebuf_init();
+
+   NETSTACK_RADIO.init();
+   /*
+   {
+     uint8_t longaddr[8];
+     uint16_t shortaddr;
+
+     shortaddr = (rimeaddr_node_addr.u8[0] << 8) +
+       rimeaddr_node_addr.u8[1];
+
+     memset(longaddr, 0, sizeof(longaddr));
+     rimeaddr_copy((rimeaddr_t *)&longaddr, &rimeaddr_node_addr);
+
+     PRINTF("MAC %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x ",
+            longaddr[0], longaddr[1], longaddr[2], longaddr[3],
+            longaddr[4], longaddr[5], longaddr[6], longaddr[7]);
+     
+     cc2520_set_pan_addr(IEEE802154_PANID, shortaddr, longaddr);
+     cc2520_set_channel(RF_CHANNEL);
+   }
+*/
+  // Initialize the network stacks
   NETSTACK_RDC.init();
   NETSTACK_MAC.init();
   NETSTACK_NETWORK.init();
 
-  printf("%s %s, channel check rate %lu Hz, radio channel %u\n",
+  PRINTF("%s %s, channel check rate %lu Hz, radio channel %u\n\r",
          NETSTACK_MAC.name, NETSTACK_RDC.name,
          CLOCK_SECOND / (NETSTACK_RDC.channel_check_interval() == 0 ? 1:
                          NETSTACK_RDC.channel_check_interval()),
-         RF_CHANNEL);
+                         RF_CHANNEL);
 
   process_start(&tcpip_process, NULL);
 
-  printf("Tentative link-local IPv6 address ");
+  PRINTF("Tentative link-local IPv6 address s");
   {
     uip_ds6_addr_t *lladdr;
     int i;
@@ -319,38 +282,46 @@ main(int argc, char **argv)
     printf("%02x%02x\n", lladdr->ipaddr.u8[14], lladdr->ipaddr.u8[15]);
   }
 
+
   if(!UIP_CONF_IPV6_RPL) {
     uip_ipaddr_t ipaddr;
     int i;
     uip_ip6addr(&ipaddr, 0xaaaa, 0, 0, 0, 0, 0, 0, 0);
     uip_ds6_set_addr_iid(&ipaddr, &uip_lladdr);
     uip_ds6_addr_add(&ipaddr, 0, ADDR_TENTATIVE);
-    printf("Tentative global IPv6 address ");
+    PRINTF("Tentative global IPv6 address ");
     for(i = 0; i < 7; ++i) {
-      printf("%02x%02x:",
+    	PRINTF("%02x%02x:",
              ipaddr.u8[i * 2], ipaddr.u8[i * 2 + 1]);
     }
-    printf("%02x%02x\n",
+    PRINTF("%02x%02x\n",
            ipaddr.u8[7 * 2], ipaddr.u8[7 * 2 + 1]);
   }
+  PRINTF("\n\r");
 
 #else /* WITH_UIP6 */
 
+  NETSTACK_RADIO.init();
   NETSTACK_RDC.init();
   NETSTACK_MAC.init();
   NETSTACK_NETWORK.init();
 
-  printf("%s %s, channel check rate %lu Hz, radio channel %u\n",
+  PRINTF("%s %s, channel check rate %lu Hz, radio channel %u\n\r",
          NETSTACK_MAC.name, NETSTACK_RDC.name,
          CLOCK_SECOND / (NETSTACK_RDC.channel_check_interval() == 0? 1:
                          NETSTACK_RDC.channel_check_interval()),
          RF_CHANNEL);
+
+  uint16_t shortaddr;
+  shortaddr = (rimeaddr_node_addr.u8[0] << 8) + rimeaddr_node_addr.u8[1];
+  uint8_t longaddr[8];
+  memset(longaddr, 0, sizeof(longaddr));
+       rimeaddr_copy((rimeaddr_t *)&longaddr, &rimeaddr_node_addr);
+  cc2520_set_pan_addr(IEEE802154_PANID, shortaddr, longaddr);
+  cc2520_set_channel(RF_CHANNEL);
+
 #endif /* WITH_UIP6 */
 
-#if !WITH_UIP && !WITH_UIP6
-  uart1_set_input(serial_line_input_byte);
-  serial_line_init();
-#endif
 
 #if PROFILE_CONF_ON
   profile_init();
@@ -364,9 +335,9 @@ main(int argc, char **argv)
 #endif /* TIMESYNCH_CONF_ENABLED */
 
 #if WITH_UIP
-  process_start(&tcpip_process, NULL);
-  process_start(&uip_fw_process, NULL);	/* Start IP output */
-  process_start(&slip_process, NULL);
+  process_start(	&tcpip_process, 	NULL);
+  process_start(	&uip_fw_process, 	NULL);	/* Start IP output */
+  process_start(	&slip_process, 		NULL);
 
   slip_set_input_callback(set_gateway);
 
@@ -387,7 +358,7 @@ main(int argc, char **argv)
     uip_over_mesh_set_gateway_netif(&slipif);
     uip_fw_default(&meshif);
     uip_over_mesh_init(UIP_OVER_MESH_CHANNEL);
-    printf("uIP started with IP address %d.%d.%d.%d\n",
+    PRINTF("uIP started with IP address %d.%d.%d.%d\n",
            uip_ipaddr_to_quad(&hostaddr));
   }
 #endif /* WITH_UIP */
@@ -399,18 +370,36 @@ main(int argc, char **argv)
   /* Stop the watchdog */
   watchdog_stop();
 
-#if !PROCESS_CONF_NO_PROCESS_NAMES
   print_processes(autostart_processes);
-#else /* !PROCESS_CONF_NO_PROCESS_NAMES */
-  putchar('\n'); /* include putchar() */
-#endif /* !PROCESS_CONF_NO_PROCESS_NAMES */
   autostart_start(autostart_processes);
+
+  leds_off(LEDS_ALL);
 
   /*
    * This is the scheduler loop.
    */
   while(1) {
 
+#ifdef LED_ALIVE_TEST
+	  /* Timeout can be increased up to 8 seconds maximum.
+	   * A one second cycle is convenient for triggering the various debug printouts.
+	   * The triggers are staggered to avoid printing everything at once.
+	   */
+	      if (rtimerflag) {
+	      	rtimer_set(&rt, RTIMER_NOW()+ RTIMER_ARCH_SECOND*1UL, 1,(void *) rtimercycle, NULL);
+	      	rtimerflag=0;
+	      	if(is_board_alive)
+	      	{
+	      		is_board_alive = 0;
+	      		leds_on(LEDS_GREEN);
+	      	}
+	      	else
+	      	{
+	      		is_board_alive = 1;
+	      		leds_off(LEDS_GREEN);
+	      	}
+	      }
+#endif
     int r;
 #if PROFILE_CONF_ON
     profile_episode_start();
@@ -436,10 +425,12 @@ main(int argc, char **argv)
 
       /* Re-enable interrupts and go to sleep atomically. */
       ENERGEST_OFF(ENERGEST_TYPE_CPU);
+#ifndef NO_LPM_CYCLING
       ENERGEST_ON(ENERGEST_TYPE_LPM);
       /* We only want to measure the processing done in IRQs when we
 	 are asleep, so we discard the processing time done when we
 	 were awake. */
+
       energest_type_set(ENERGEST_TYPE_IRQ, irq_energest);
       watchdog_stop();
       _BIS_SR(GIE | SCG0 | SCG1 | CPUOFF); /* LPM3 sleep. This
@@ -448,14 +439,15 @@ main(int argc, char **argv)
                                               woken up by an
                                               interrupt that sets
                                               the wake up flag. */
-
+      watchdog_start();
       /* We get the current processing time for interrupts that was
          done during the LPM and store it for next time around.  */
       dint();
       irq_energest = energest_type_time(ENERGEST_TYPE_IRQ);
       eint();
-      watchdog_start();
+      //watchdog_start();
       ENERGEST_OFF(ENERGEST_TYPE_LPM);
+#endif
       ENERGEST_ON(ENERGEST_TYPE_CPU);
     }
   }
@@ -465,6 +457,6 @@ main(int argc, char **argv)
 void
 log_message(char *m1, char *m2)
 {
-  printf("%s%s\n", m1, m2);
+  PRINTF("%s%s\n", m1, m2);
 }
 #endif /* LOG_CONF_ENABLED */

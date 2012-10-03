@@ -43,6 +43,9 @@
 #define PLATFORM_HAS_LEDS   1
 #define PLATFORM_HAS_BUTTON 1
 
+/*-- specific = 0 for Insa mote , else switch to 1 if present --*/
+#define PLATFORM_HAS_DS2411 0
+
 /* CPU target speed in Hz */
 #define F_CPU 16000000uL
 
@@ -64,15 +67,10 @@ typedef unsigned short uip_stats_t;
 typedef unsigned long clock_time_t;
 typedef unsigned long off_t;
 
-/* the low-level radio driver */
-#define NETSTACK_CONF_RADIO   cc2520_driver
-
 #define ROM_ERASE_UNIT_SIZE  512
 #define XMEM_ERASE_UNIT_SIZE (64*1024L)
 
-
 #define CFS_CONF_OFFSET_TYPE    long
-
 
 /* Use the first 64k of external flash for node configuration */
 #define NODE_ID_XMEM_OFFSET     (0 * XMEM_ERASE_UNIT_SIZE)
@@ -119,13 +117,15 @@ typedef unsigned long off_t;
  */
 
 #define FLASH_PWR       //3       /* P4.3 Output */
-#define FLASH_CS        //4       /* P4.4 Output */
+#define FLASH_CS        0//4       /* P4.4 Output */
 #define FLASH_HOLD      //7       /* P4.7 Output */
 
 /* Enable/disable flash access to the SPI bus (active low). */
 
-#define SPI_FLASH_ENABLE()  //( P4OUT &= ~BV(FLASH_CS) )
-#define SPI_FLASH_DISABLE() //( P4OUT |=  BV(FLASH_CS) )
+#define SPI_FLASH_ENABLE()  ( P4OUT &= ~BV(FLASH_CS) )
+#define SPI_FLASH_DISABLE() ( P4OUT |=  BV(FLASH_CS) )
+
+#define SPI_FLASH_NOSELECT() { P4DIR &= ~(0x01) ; P4REN |= (0x01); P4OUT |= (0x01);}
 
 #define SPI_FLASH_HOLD()               // ( P4OUT &= ~BV(FLASH_HOLD) )
 #define SPI_FLASH_UNHOLD()              //( P4OUT |=  BV(FLASH_HOLD) )
@@ -180,7 +180,6 @@ typedef unsigned long off_t;
     CC2520_CLEAR_FIFOP_INT();                         \
   } while(0)
 
-/* FIFOP on external interrupt 0. */
 /* FIFOP on external interrupt 0. */
 #define CC2520_ENABLE_FIFOP_INT()          do { P1IE |= BV(CC2520_FIFOP_PIN); } while (0)
 #define CC2520_DISABLE_FIFOP_INT()         do { P1IE &= ~BV(CC2520_FIFOP_PIN); } while (0)

@@ -54,6 +54,55 @@
 #include "dev/ds2411.h"
 
 unsigned char ds2411_id[8];
+#ifdef CONTIKI_TARGET_WISMOTE
+/* 1-wire is at p1.1 */
+#define PIN BV(1)
+
+#define PIN_INIT() {\
+  P1SEL &= ~PIN;		/* p1.1 not TA0*/\
+  P1DIR &= ~PIN;		/* p1.1 in, resistor pull high */\
+  P1OUT &= ~PIN;		/* p1.1 == 0 but still input */\
+  P1REN |= PIN;\
+}
+
+/* Set 1-Wire low or high. */
+#define OUTP_0() {P1DIR |=  PIN;  P1OUT &= ~PIN;} /* output and p1.1 == 0 from above */
+#define OUTP_1() {P1DIR &= ~PIN ;P1REN |= PIN;P1OUT |= PIN;} /* p1.1 in, external resistor pull high */
+
+/* Read one bit. */
+#define INP()    (P1IN & PIN)
+
+/*
+ * Delay for u microseconds on a MSP430 at 16MHz.
+ *
+ * The loop in clock_delay consists of one add and one jnz, i.e 3
+ * cycles.
+ *
+ * 3 cycles at 2.4756MHz ==> 1.2us = 6/5us.
+ *
+ * Call overhead is roughly 7 cycles and the loop 3 cycles, to
+ * compensate for call overheads we make 7/3=14/6 fewer laps in the
+ * loop.
+ *
+ * This macro will loose badly if not passed a constant argument, it
+ * relies on the compiler doing the arithmetic during compile time!!
+ * TODO: Fix above comment to be correct - below code is modified for 4Mhz
+ */
+#define udelay(u) clock_delay((u*28)/10)//clock_delay((u*8 - 14)/6)
+
+
+
+/*
+ * Where call overhead dominates, use a macro!
+ * Note: modified for 4 Mhz
+ */
+#define udelay_6() udelay(6)
+/*{ _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP();\
+					_NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP();\
+					_NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP();\
+					_NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP();\
+					}*/
+#endif
 
 #ifdef CONTIKI_TARGET_SKY
 /* 1-wire is at p2.4 */
@@ -93,7 +142,7 @@ unsigned char ds2411_id[8];
  * Where call overhead dominates, use a macro!
  * Note: modified for 4 Mhz
  */
-#define udelay_6() { _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); }
+#define udelay_6() { _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP(); _NOP();}
 
 #endif /* CONTIKI_TARGET_SKY */
 
@@ -211,6 +260,7 @@ ds2411_init()
 
     /* Verify family and that CRC match. */
     if(family != 0x01) {
+
       goto fail;
     }
     acc = crc8_add(0x0, family);
@@ -224,6 +274,7 @@ ds2411_init()
       ds2411_id[1] = 0x12;
       ds2411_id[2] = 0x75;
 #endif /* CONTIKI_TARGET_SKY */
+
       return 1;			/* Success! */
     }
   }
