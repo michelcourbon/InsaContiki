@@ -1,0 +1,42 @@
+# usefull for wismote BSL... don't remove it please
+LDFLAGS += -Wl,-Ttext=0x8000
+CFLAGS += -Wl,-Ttext=0x8000
+
+# if you have files to add in this project for example :
+#CONTIKI_SOURCEFILES += my-sensor.c
+
+# give your project name
+CONTIKI_PROJECT = myappli
+ 
+all: $(CONTIKI_PROJECT)
+
+# security if makefile.target don't exist
+ifndef TARGET
+	TARGET=wismote
+endif
+
+mote : $(CONTIKI_PROJECT)
+	msp430-objcopy -O ihex $(CONTIKI_PROJECT).wismote $(CONTIKI_PROJECT).hex
+	python -m msp430.memory.convert -i ihex -f titext $(CONTIKI_PROJECT).hex -o $(CONTIKI_PROJECT).txt
+
+upload : $(CONTIKI_PROJECT).txt 
+	python -m msp430.bsl5.uart --erase=0x8000-0xFE00 -p /dev/ttyUSB0 $(CONTIKI_PROJECT).txt
+
+purge : 
+	rm -f *~ *core core *.srec \
+	*.lst *.map \
+        *.cprg *.bin *.data contiki*.a *.firmware core-labels.S *.ihex *.ini \
+        *.ce *.co $(CLEAN) \
+        $(CONTIKI_PROJECT).txt $(CONTIKI_PROJECT).wismote $(CONTIKI_PROJECT).hex
+	-rm -rf $(OBJECTDIR)	 
+
+# Force the Node id network
+# be carefull.. if you change the node id... clean in necessary 
+CFLAGS += -DNODE_ID=1 -DNO_DUTY_CYCLE
+CFLAGS += -DPROCESS_CONF_NO_PROCESS_NAMES=1
+
+#CFLAGS += -DWITH_UIP 
+
+# include the Contiki makefile, and so the others makefile
+CONTIKI = ../../..
+include $(CONTIKI)/Makefile.include
