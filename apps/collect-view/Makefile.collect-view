@@ -6,6 +6,10 @@ else
 ifeq ($(TARGET), z1)
 collect-view_src += collect-view-z1.c
 else
+ifeq ($(TARGET), wismote)
+collect-view_src += collect-view-wismote.c
+else
 collect-view_src += collect-view-template.c
+endif
 endif
 endif
