@@ -33,8 +33,8 @@
 #include "dev/button.h"
 #include "isr_compat.h"
 
-#define BUTTON_PORT 2
-#define BUTTON_PIN  7
+#define BUTTON_PORT 1
+#define BUTTON_PIN  4
 
 static struct button_msg button_msg;
 
@@ -45,26 +45,26 @@ button_init(struct process *proc)
 {
   button_msg.type = BUTTON_MSG_TYPE;
 
-  P2DIR &= ~BV(BUTTON_PIN);
-  P2SEL &= ~BV(BUTTON_PIN);
+  P1DIR &= ~BV(BUTTON_PIN);
+  P1SEL &= ~BV(BUTTON_PIN);
 
-  P2IES |= BV(BUTTON_PIN);
-  P2IFG &= ~BV(BUTTON_PIN);
+  P1IES |= BV(BUTTON_PIN);
+  P1IFG &= ~BV(BUTTON_PIN);
 
   selecting_proc = proc;
   if(proc != NULL)
-    P2IE |= BV(BUTTON_PIN);
+    P1IE |= BV(BUTTON_PIN);
   else
-    P2IE &= ~BV(BUTTON_PIN);
+    P1IE &= ~BV(BUTTON_PIN);
 }
 
 ISR(PORT2, __button_interrupt)
 {
   static struct timer debouncetimer;
 
-  P2IFG &= ~BV(BUTTON_PIN);
+  P1IFG &= ~BV(BUTTON_PIN);
   if(timer_expired(&debouncetimer)) {
-    button_msg.value = P2IN & BV(BUTTON_PIN);
+    button_msg.value = P1IN & BV(BUTTON_PIN);
     timer_set(&debouncetimer, CLOCK_SECOND/4);
     if(selecting_proc != NULL) {
       process_post(selecting_proc, PROCESS_EVENT_MSG, &button_msg);

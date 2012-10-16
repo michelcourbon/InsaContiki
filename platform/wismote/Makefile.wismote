@@ -32,10 +32,10 @@ LDFLAGS += -Wl,-Ttext=0x8000
 CFLAGS += -Wl,-Ttext=0x8000 
 
 # 20 bits flags for compilation
-ifdef C20B
+#ifdef C20B
 CFLAGS += -D__MSP430F5437__ 	-mmemory-model=huge -mcode-region=far -mdata-region=far -misr20 -mc20 -md20 -msr20  -ma20
 LDFLAGS += -D__MSP430F5437__  	-mmemory-model=huge -mcode-region=far -mdata-region=far -misr20 -mc20 -md20 -msr20  -ma20 
-endif
+#endif
 
 include $(CONTIKI)/cpu/msp430/Makefile.msp430
 

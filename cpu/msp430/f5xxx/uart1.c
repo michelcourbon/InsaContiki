@@ -97,8 +97,8 @@ uart1_init(unsigned long ubr)
   transmitting = 0;
 
   /* XXX Clear pending interrupts before enable */
-  UCA1IE &= ~UCRXIFG;
-  UCA1IE &= ~UCTXIFG;
+  UCA1IFG &= ~UCRXIFG;
+  UCA1IFG &= ~UCTXIFG;
 
   UCA1CTL1 &= ~UCSWRST;                   /* Initialize USCI state machine **before** enabling interrupts */
   UCA1IE |= UCRXIE;                        /* Enable UCA1 RX interrupt */

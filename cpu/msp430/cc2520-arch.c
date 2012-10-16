@@ -32,7 +32,6 @@
 
 #include "dev/spi.h"
 #include "dev/cc2520.h"
-#include "isr_compat.h"
 
 #ifdef CC2520_CONF_SFD_TIMESTAMPS
 #define CONF_SFD_TIMESTAMPS CC2520_CONF_SFD_TIMESTAMPS
@@ -47,16 +46,28 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-ISR(CC2520_IRQ, cc2520_port1_interrupt)
+
+void __attribute__((__interrupt__(CC2520_IRQ_VECTOR))) __attribute__((section(".text")))  cc2520_port1_interrupt(void)
 {
+  uint8_t button_result = 0;
   ENERGEST_ON(ENERGEST_TYPE_IRQ);
 
-  if(cc2520_interrupt()) {
-    LPM4_EXIT;
+  /* TODO Workaround in the WiSMote*/
+  if(P1IFG & (1 << 4)) // Check if the button has been pushed
+  {
+	  button_result = irq_p1(); // Call the button handler
   }
 
+  if(cc2520_interrupt())
+	LPM4_EXIT;
+
+  if (button_result)
+	LPM4_EXIT;
+
+  P1IFG = 0x00;
   ENERGEST_OFF(ENERGEST_TYPE_IRQ);
 }
+
 /*---------------------------------------------------------------------------*/
 void
 cc2520_arch_init(void)

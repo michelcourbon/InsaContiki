@@ -32,7 +32,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#if (1)
+#define DEBUG 1
+#if DEBUG
 #define PRINTF(...) printf(__VA_ARGS__)
 #else
 #define PRINTF(...)
@@ -66,13 +67,6 @@ unsigned char euid64_id[8];
 
 #include "net/rime.h"
 
-#ifdef ARAGO_INTERP_APP
-#include "arch_command_interpreter.h"
-#include "arago_command_frame.h"
-radio_config_struct radio_config_start;
-#endif
-
-#include "node-id.h"
 #include "sys/autostart.h"
 #include "sys/profile.h"
 
@@ -115,20 +109,15 @@ static uint8_t is_gateway;
 #endif
 
 void init_platform(void);
-void uip_log(char *msg) { puts(msg); }
-/*---------------------------------------------------------------------------*/
-#ifndef RF_CHANNEL
-#define RF_CHANNEL              15
-#endif
 
 /*
  * set Rime address
- *
  */
 static void
 set_rime_addr(void)
 {
   rimeaddr_t n_addr;
+  int i;
 
   memset(&n_addr, 0, sizeof(rimeaddr_t));
 
@@ -143,7 +132,6 @@ set_rime_addr(void)
 
   rimeaddr_set_node_addr(&n_addr);
 
-  int i;
   PRINTF("Rime started with address ");
   for(i = 0; i < sizeof(n_addr.u8) - 1; i++) {
     PRINTF("%X.", n_addr.u8[i]);
@@ -156,13 +144,12 @@ static void
 print_processes(struct process * const processes[])
 {
   /*  const struct process * const * p = processes;*/
-  PRINTF(" Starting");
+  PRINTF("Starting");
   while(*processes != NULL) {
     PRINTF(" '%s'", (*processes)->name);
     processes++;
   }
-  putchar('\n');
-  PRINTF("\r");
+  PRINTF("\n");
 }
 /*--------------------------------------------------------------------------*/
 #if WITH_UIP
@@ -191,7 +178,6 @@ uint8_t is_board_alive = 1;
 int
 main(int argc, char **argv)
 {
-  int i ;
   /*
    * Initalize hardware.
    */
@@ -207,36 +193,20 @@ main(int argc, char **argv)
 #endif /* WITH_UIP */
 
   rtimer_init();
-  clock_wait(4);
 
   /*
    * Hardware initialization done!
    */
 
-  /* XXX hack: Fix it so that the 802.15.4 MAC address is compatible
-     with an Ethernet MAC address - byte 0 (byte 2 in the DS ID)
-     cannot be odd. todo ds2411_id[2] &= 0xfe; */
+  clock_wait(4);
 
 #if PLATFORM_HAS_DS2411
   ds2411_init();
-  ds2411_id[2] &= 0xfe;
   memcpy (euid64_id,ds2411_id,sizeof(euid64_id));
 #else
   memory_id_init();
   memcpy (euid64_id,memory_id,sizeof(euid64_id));
-#endif
-
   euid64_id[0]=0;euid64_id[1]=0;euid64_id[2]=0;euid64_id[3]=0;
-  euid64_id[4]=0;euid64_id[5]=0;
-
-  /* for setting "hardcoded" IEEE 802.15.4 MAC addresses */
-#ifdef IEEE_802154_MAC_ADDRESS
-  {
-    uint8_t ieee[] = IEEE_802154_MAC_ADDRESS;
-  }
-    memcpy(ds2411_id, ieee, sizeof(uip_lladdr.addr));
-    ds2411_id[7] = node_id & 0xff;
-  }
 #endif
 
   leds_off(LEDS_BLUE);
@@ -248,11 +218,14 @@ main(int argc, char **argv)
   process_start(&etimer_process, NULL);
   ctimer_init();
   init_platform();
+
+  clock_wait(5);
   set_rime_addr();
+  PRINTF(" %s started. \n\r",CONTIKI_VERSION_STRING);
 
-  PRINTF(CONTIKI_VERSION_STRING " started. \n\r");
+  int i ;
 
-  #if WITH_UIP6
+#if WITH_UIP6
 
   for(i =0;i<RIMEADDR_SIZE;i++)
     uip_lladdr.addr[i] = rimeaddr_node_addr.u8[i];
@@ -261,6 +234,7 @@ main(int argc, char **argv)
   queuebuf_init();
 
    NETSTACK_RADIO.init();
+   /*
    {
      uint8_t longaddr[8];
      uint16_t shortaddr;
@@ -278,7 +252,7 @@ main(int argc, char **argv)
      cc2520_set_pan_addr(IEEE802154_PANID, shortaddr, longaddr);
      cc2520_set_channel(RF_CHANNEL);
    }
-
+*/
   // Initialize the network stacks
   NETSTACK_RDC.init();
   NETSTACK_MAC.init();
@@ -333,6 +307,7 @@ main(int argc, char **argv)
          CLOCK_SECOND / (NETSTACK_RDC.channel_check_interval() == 0? 1:
                          NETSTACK_RDC.channel_check_interval()),
          RF_CHANNEL);
+
   uint16_t shortaddr;
   shortaddr = (rimeaddr_node_addr.u8[0] << 8) + rimeaddr_node_addr.u8[1];
   uint8_t longaddr[8];

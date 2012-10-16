@@ -43,8 +43,10 @@
 #define PLATFORM_HAS_LEDS   1
 #define PLATFORM_HAS_BUTTON 1
 
-/*-- specific = 0 for Insa mote , else switch to 1 if present --*/
+/*-- specific = 0 for Insa mote , else switch to 1 if chip is present --*/
 #define PLATFORM_HAS_DS2411 0
+/*-- specific = 1 for insa mote, else switch to 0 --*/
+#define SHT15INSA 1
 
 /* CPU target speed in Hz */
 #define F_CPU 16000000uL

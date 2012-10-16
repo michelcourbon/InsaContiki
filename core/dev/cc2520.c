@@ -137,21 +137,54 @@ static uint8_t receive_on;
 static int channel;
 
 /*---------------------------------------------------------------------------*/
+#define MAX_SIZE_CIRC_BUFF 381
+u8_t cc2520_circular_buf[MAX_SIZE_CIRC_BUFF];
+volatile u8_t rx_byte_count = 0;
+volatile u16_t circular_queue;
+volatile u16_t circular_head;
+volatile u16_t circular_buffer_byte_count;
+/*---------------------------------------------------------------------------*/
 
 static void
-getrxdata(void *buf, int len)
+getrxdata(u8_t *buf, u8_t data_len)
 {
-  CC2520_READ_FIFO_BUF(buf, len);
+  //CC2520_READ_FIFO_BUF(buf, len);
+
+  u8_t i = 0;
+
+  PRINTF("read data len %d\n\r",data_len);
+
+  while(i!=data_len)
+  {
+	  buf[i] = cc2520_circular_buf[circular_head++];
+	  i++;
+	  if(circular_head >= MAX_SIZE_CIRC_BUFF)
+		  circular_head = circular_head - MAX_SIZE_CIRC_BUFF;
+
+	  circular_buffer_byte_count--;
+  }
+
+  //circular_buffer_byte_count -= data_len;
+
 }
 static void
 getrxbyte(uint8_t *byte)
 {
-  CC2520_READ_FIFO_BYTE(*byte);
+  //CC2520_READ_FIFO_BYTE(*byte);
+
+  byte[0] = cc2520_circular_buf[circular_head++];
+
+  if(circular_head >= MAX_SIZE_CIRC_BUFF)
+	  circular_head = circular_head - MAX_SIZE_CIRC_BUFF;
+
+  circular_buffer_byte_count--;
 }
 static void
 flushrx(void)
 {
   uint8_t dummy;
+
+  PRINTF("flush_rx()\n\r");
 
   CC2520_READ_FIFO_BYTE(dummy);
   CC2520_STROBE(CC2520_INS_SFLUSHRX);
@@ -275,10 +308,9 @@ cc2520_init(void)
   /* correlation threshold = 20, RX bandpass filter = 1.3uA.*/
 
   setreg(CC2520_TXCTRL,      0x94);
-  setreg(CC2520_TXPOWER,     0x13);    // Output power 1 dBm
+  setreg(CC2520_TXPOWER,     0x32);    // Output power 0 dBm
 
   /*
-
 	valeurs de TXPOWER
 	  0x03 -> -18 dBm
 	  0x2C -> -7 dBm
@@ -315,12 +347,15 @@ cc2520_init(void)
 #if CC2520_CONF_AUTOACK
   setreg(CC2520_FRMCTRL0,    AUTOCRC | AUTOACK);
   setreg(CC2520_FRMFILT0,    FRAME_MAX_VERSION|FRAME_FILTER_ENABLE);
+  //setreg(CC2520_FRMFILT0,    0x00);
 #else
   /* setreg(CC2520_FRMCTRL0,    0x60); */
   setreg(CC2520_FRMCTRL0,    AUTOCRC);
   /* Disable filter on @ (remove if you want to address specific wismote) */
   setreg(CC2520_FRMFILT0,    0x00);
 #endif /* CC2520_CONF_AUTOACK */
+
+
   /* SET_RXENMASK_ON_TX */
   setreg(CC2520_FRMCTRL1,          1);
   /* Set FIFOP threshold to maximum .*/
@@ -328,7 +363,7 @@ cc2520_init(void)
 
   cc2520_set_pan_addr(0xffff, 0x0000, NULL);
   cc2520_set_channel(26);
-
+  
   flushrx();
 
   process_start(&cc2520_process, NULL);
@@ -339,7 +374,6 @@ static int
 cc2520_transmit(unsigned short payload_len)
 {
   int i, txpower;
-
   GET_LOCK();
 
   txpower = 0;
@@ -442,6 +476,7 @@ cc2520_prepare(const void *payload, unsigned short payload_len)
   GET_LOCK();
 
   PRINTF("cc2520: sending %d bytes\n", payload_len);
+
   /*int i;
   for(i = 0; i < payload_len;i++)
 	  printf("%x",((uint8_t *) payload)[i]);
@@ -465,6 +500,7 @@ cc2520_prepare(const void *payload, unsigned short payload_len)
 static int
 cc2520_send(const void *payload, unsigned short payload_len)
 {
+
   cc2520_prepare(payload, payload_len);
   return cc2520_transmit(payload_len);
 }
@@ -562,7 +598,6 @@ cc2520_set_pan_addr(unsigned pan,
                     const uint8_t *ieee_addr)
 {
   uint8_t tmp[2];
-
   GET_LOCK();
 
   /*
@@ -598,25 +633,165 @@ cc2520_set_pan_addr(unsigned pan,
 TIMETABLE(cc2520_timetable);
 TIMETABLE_AGGREGATE(aggregate_time, 10);
 #endif /* CC2520_TIMETABLE_PROFILING */
+
+
 int
 cc2520_interrupt(void)
 {
+  u8_t i = 0;
+  PRINTF("cc2520_interrupt\n\r");
   CC2520_CLEAR_FIFOP_INT();
-  process_poll(&cc2520_process);
-#if CC2520_TIMETABLE_PROFILING
-  timetable_clear(&cc2520_timetable);
-  TIMETABLE_TIMESTAMP(cc2520_timetable, "interrupt");
-#endif /* CC2520_TIMETABLE_PROFILING */
 
-  last_packet_timestamp = cc2520_sfd_start_time;
-  cc2520_packets_seen++;
-  return 1;
+  if(CC2520_FIFOP_IS_1) {
+     if(!CC2520_FIFO_IS_1) {
+       /* Clean up in case of FIFO overflow!  This happens for every
+        * full length frame and is signaled by FIFOP = 1 and FIFO =
+        * 0. */
+
+       flushrx();
+       return 0;
+     }
+     else
+     {
+		  // Read how many byte are present in the RX FIFOcc2520_transmit
+    	 rx_byte_count = getreg(CC2520_RXFIFOCNT);
+    	 if(rx_byte_count <= 128)
+    	 {
+			 // Another check in case of desynchronisation
+			 if(circular_queue > circular_head)
+			 {
+				 if ((circular_queue - circular_head ) != circular_buffer_byte_count)
+				 {
+					PRINTF("circular_buffer_byte_count %d \n",circular_buffer_byte_count);
+					PRINTF("rx_byte_cout %d \n",rx_byte_count);
+					PRINTF("circular_queue %d \n",circular_queue);
+					PRINTF("circular_head %d \n\r",circular_head);
+					 circular_buffer_byte_count =0;
+					 circular_head = 0;
+					 circular_queue = 0;
+				 }
+			 }
+			 if(circular_queue < circular_head)
+			 {
+				 if (((MAX_SIZE_CIRC_BUFF - circular_head) + circular_queue) != circular_buffer_byte_count)
+				 {
+					PRINTF("circular_buffer_byte_count %d \n",circular_buffer_byte_count);
+					PRINTF("rx_byte_cout %d \n",rx_byte_count);
+					PRINTF("circular_queue %d \n",circular_queue);
+					PRINTF("circular_head %d \n\r",circular_head);
+
+					circular_buffer_byte_count =0;
+					circular_head = 0;
+					circular_queue = 0;
+				 }
+			 }
+
+			 if((rx_byte_count > (MAX_SIZE_CIRC_BUFF - circular_buffer_byte_count)) | (rx_byte_count > CC2520_MAX_PACKET_LEN)) // if we do not have space
+			 {
+				 if(circular_buffer_byte_count != 0)
+					 process_poll(&cc2520_process); // poll the process that we have a packet
+				
+				 flushrx();
+				 return 0;
+			 }
+			 else
+			 {
+				 i = 0;
+				  while(i < rx_byte_count)
+				  {
+					  // Get byte from the cc2520 RX fifo buffer
+
+					  if(circular_queue >= MAX_SIZE_CIRC_BUFF) // If circular buffer queue exceed buffer capability
+							  circular_queue = circular_queue - MAX_SIZE_CIRC_BUFF;
+
+
+					  CC2520_READ_FIFO_BYTE(cc2520_circular_buf[circular_queue++]);
+
+					
+
+					  if(circular_queue >= MAX_SIZE_CIRC_BUFF) // If circular buffer queue exceed buffer capability
+						  circular_queue = circular_queue - MAX_SIZE_CIRC_BUFF;
+
+					
+
+					  i++;
+				  }
+
+				  circular_buffer_byte_count += rx_byte_count;
+
+	#if DEBUG
+				  /************************************************************/
+					  /************************************************************/
+					  /************************************************************/
+					  /************************************************************/
+					  PRINTF("circular_buffer_byte_count %d \n",circular_buffer_byte_count);
+					  PRINTF("cc2520_circular_buf[circular_head] %d \n",cc2520_circular_buf[circular_head]);
+					  PRINTF("rx_byte_cout %d \n",rx_byte_count);
+					  PRINTF("circular_queue %d \n",circular_queue);
+					  PRINTF("circular_head %d \n\r",circular_head);
+
+					  int k;
+								  if(circular_head <= circular_queue) // [....]
+								  {
+									for(k=0;k<circular_head;k++)
+										printf(".");
+
+									printf("[");
+									for(k;k<circular_queue;k++)
+										printf(".");
+
+									printf("]");
+									for(k;k<MAX_SIZE_CIRC_BUFF;k++)
+										printf(".");
+								  }
+								  else // ...]    [...
+								  {
+									for(k=0;k<circular_queue;k++)
+												printf(".");
+									printf("]");
+
+									for(k;k<circular_head;k++)
+										printf(".");
+									printf("[");
+
+									for(k;k<MAX_SIZE_CIRC_BUFF;k++)
+										printf(".");
+								  }
+								  printf("\r\n");
+
+								  /************************************************************/
+								/************************************************************/
+								/************************************************************/
+	#endif
+				  flushrx(); // We have read the RXFIFO now flush it
+				  process_poll(&cc2520_process); // poll the process that we have a packet
+				#if CC2520_TIMETABLE_PROFILING
+				  timetable_clear(&cc2520_timetable);
+				  TIMETABLE_TIMESTAMP(cc2520_timetable, "interrupt");
+				#endif /* CC2520_TIMETABLE_PROFILING */
+
+				  last_packet_timestamp = cc2520_sfd_start_time;
+				  cc2520_packets_seen++;
+
+
+				  return 1;
+			 }
+    	 }
+  }
+  }
+     
+  flushrx();
+  return 0;
 }
 /*---------------------------------------------------------------------------*/
+u8_t countexflag = 0;
 PROCESS_THREAD(cc2520_process, ev, data)
 {
   int len;
   PROCESS_BEGIN();
+  circular_queue = 0;
+  circular_head = 0;
+  circular_buffer_byte_count = 0;
 
   PRINTF("cc2520_process: started\n");
 
@@ -626,21 +801,31 @@ PROCESS_THREAD(cc2520_process, ev, data)
     TIMETABLE_TIMESTAMP(cc2520_timetable, "poll");
 #endif /* CC2520_TIMETABLE_PROFILING */
 
-    PRINTF("cc2520_process: calling receiver callback\n");
+    if(getreg(CC2520_EXCFLAG0) & 0x10)
+    {
+    	printf("COUNT %d EXCFLAG0 %x\n",++countexflag,getreg(CC2520_EXCFLAG0));
+    }
+    if(circular_buffer_byte_count != 0)
+    {
+		PRINTF("cc2520_process: calling receiver callback\n");
 
-    packetbuf_clear();
-    packetbuf_set_attr(PACKETBUF_ATTR_TIMESTAMP, last_packet_timestamp);
-    len = cc2520_read(packetbuf_dataptr(), PACKETBUF_SIZE);
-    packetbuf_set_datalen(len);
+		packetbuf_clear();
+		packetbuf_set_attr(PACKETBUF_ATTR_TIMESTAMP, last_packet_timestamp);
+		len = cc2520_read(packetbuf_dataptr(), PACKETBUF_SIZE);
+		packetbuf_set_datalen(len);
 
-    NETSTACK_RDC.input();
-    /* flushrx(); */
+		PRINTF("NETSTACK_RDC.input()\n");
+		NETSTACK_RDC.input();
+		PRINTF("NETSTACK_RDC.input() DONE\n");
+
+		/* flushrx(); */
 #if CC2520_TIMETABLE_PROFILING
-    TIMETABLE_TIMESTAMP(cc2520_timetable, "end");
-    timetable_aggregate_compute_detailed(&aggregate_time,
-                                         &cc2520_timetable);
-    timetable_clear(&cc2520_timetable);
+		TIMETABLE_TIMESTAMP(cc2520_timetable, "end");
+		timetable_aggregate_compute_detailed(&aggregate_time,
+											 &cc2520_timetable);
+		timetable_clear(&cc2520_timetable);
 #endif /* CC2520_TIMETABLE_PROFILING */
+    }
   }
 
   PROCESS_END();
@@ -652,15 +837,13 @@ cc2520_read(void *buf, unsigned short bufsize)
   uint8_t footer[2];
   uint8_t len;
 
-  if(!CC2520_FIFOP_IS_1) {
-    return 0;
-  }
-
   GET_LOCK();
-
   cc2520_packets_read++;
 
+  dint(); // We mask all interrupt to avoid the cc2520 IT which might corrupt the circular buffer content
   getrxbyte(&len);
+  eint(); // We enable all interrupt
+
 
   if(len > CC2520_MAX_PACKET_LEN) {
     /* Oops, we must be out of sync. */
@@ -684,13 +867,19 @@ cc2520_read(void *buf, unsigned short bufsize)
     return 0;
   }
 
+ 
   getrxdata(buf, len - FOOTER_LEN);
-  getrxdata(footer, FOOTER_LEN);
+ 
+
+
+  //getrxdata(&footer, 2);//FOOTER_LEN);
+  getrxbyte(&footer[0]);
+  getrxbyte(&footer[1]);
+
 
   if(footer[1] & FOOTER1_CRC_OK) {
     cc2520_last_rssi = footer[0];
     cc2520_last_correlation = footer[1] & FOOTER1_CORRELATION;
-
 
     packetbuf_set_attr(PACKETBUF_ATTR_RSSI, cc2520_last_rssi);
     packetbuf_set_attr(PACKETBUF_ATTR_LINK_QUALITY, cc2520_last_correlation);
@@ -702,23 +891,13 @@ cc2520_read(void *buf, unsigned short bufsize)
     len = FOOTER_LEN;
   }
 
-  if(CC2520_FIFOP_IS_1) {
-    if(!CC2520_FIFO_IS_1) {
-      /* Clean up in case of FIFO overflow!  This happens for every
-       * full length frame and is signaled by FIFOP = 1 and FIFO =
-       * 0. */
-      flushrx();
-    } else {
+  if(circular_buffer_byte_count != 0)//if(circular_queue != circular_head)
+  {
       /* Another packet has been received and needs attention. */
       process_poll(&cc2520_process);
-    }
   }
 
   RELEASE_LOCK();
-
-  if(len < FOOTER_LEN) {
-    return 0;
-  }
 
   return len - FOOTER_LEN;
 }
